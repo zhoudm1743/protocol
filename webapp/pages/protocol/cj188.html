@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="renderer" content="webkit" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>CJ188协议</title>
+  <link rel="stylesheet" type="text/css" href="../../lib/layui/css/layui.css" />
+  <style>
+    body {
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .protocol-container {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+
+    .protocol-container .title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid rgb(240, 97, 47);
+    }
+
+    .result-box {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #f9f9f9;
+      border: 1px solid #e6e6e6;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .result-box pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .hex-display {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      color: #333;
+      word-break: break-all;
+    }
+
+    .frame-info {
+      margin-top: 15px;
+    }
+
+    .frame-info .info-item {
+      margin: 8px 0;
+      padding: 8px;
+      background-color: #fff;
+      border-left: 3px solid rgb(240, 97, 47);
+    }
+
+    .frame-info .info-label {
+      font-weight: bold;
+      color: #666;
+      margin-right: 10px;
+    }
+
+    .simulate-status {
+      margin-top: 15px;
+      padding: 10px;
+      background-color: #e8f5e9;
+      border-radius: 4px;
+    }
+
+    .simulate-status.running {
+      background-color: #fff3e0;
+    }
+
+    .simulate-status.stopped {
+      background-color: #ffebee;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="protocol-container">
+    <div class="title">CJ188协议解析</div>
+    <form class="layui-form" lay-filter="parseForm">
+      <div class="layui-form-item">
+        <label class="layui-form-label">十六进制数据</label>
+        <div class="layui-input-block">
+          <textarea name="hexData" placeholder="请输入十六进制数据，例如：FE FE FE 68 10 77 66 55 44 33 22 11 01 03 90 1F 01 08 16"
+            class="layui-textarea" rows="3"></textarea>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <div class="layui-input-block">
+          <button class="layui-btn" lay-submit lay-filter="parseBtn">解析</button>
+          <button type="reset" class="layui-btn layui-btn-primary">清空</button>
+        </div>
+      </div>
+    </form>
+    <div id="parseResult" class="result-box" style="display: none;"></div>
+  </div>
+
+  <div class="protocol-container">
+    <div class="title">CJ188协议构建</div>
+    <form class="layui-form" lay-filter="buildForm">
+      <div class="layui-form-item">
+        <label class="layui-form-label">表计类型</label>
+        <div class="layui-input-block">
+          <select name="meterType" lay-verify="required">
+            <option value="">请选择</option>
+            <option value="16">水表 (0x10)</option>
+            <option value="48">气表 (0x30)</option>
+            <option value="64">电表 (0x40)</option>
+          </select>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">地址</label>
+        <div class="layui-input-block">
+          <input type="text" name="addr" placeholder="14位十六进制字符串，例如：77665544332211" lay-verify="required"
+            class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">数据标识</label>
+        <div class="layui-input-block">
+          <input type="text" name="dataId" placeholder="4位十六进制字符串，例如：901F" lay-verify="required"
+            class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">序列号</label>
+        <div class="layui-input-block">
+          <input type="number" name="serial" value="1" min="0" max="255" class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">帧类型</label>
+        <div class="layui-input-block">
+          <select name="frameType" lay-verify="required">
+            <option value="">请选择</option>
+            <option value="read">查询帧</option>
+            <option value="reply">应答帧</option>
+          </select>
+        </div>
+      </div>
+      <div class="layui-form-item" id="replyFields" style="display: none;">
+        <label class="layui-form-label">累积流量</label>
+        <div class="layui-input-block">
+          <input type="text" name="flowData" placeholder="十六进制值，例如：12345678 (将转换为小端序)" class="layui-input" />
+          <div class="layui-form-mid layui-word-aux">输入十六进制值，系统会自动转换为小端序4字节</div>
+        </div>
+      </div>
+      <div class="layui-form-item" id="replyStatusField" style="display: none;">
+        <label class="layui-form-label">状态字节</label>
+        <div class="layui-input-block">
+          <input type="number" name="status" value="0" min="0" max="255" class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <div class="layui-input-block">
+          <button class="layui-btn" lay-submit lay-filter="buildBtn">构建</button>
+          <button type="reset" class="layui-btn layui-btn-primary">清空</button>
+        </div>
+      </div>
+    </form>
+    <div id="buildResult" class="result-box" style="display: none;"></div>
+  </div>
+
+  <div class="protocol-container">
+    <div class="title">CJ188协议设备模拟</div>
+    <form class="layui-form" lay-filter="simulateForm">
+      <div class="layui-form-item">
+        <label class="layui-form-label">连接类型</label>
+        <div class="layui-input-block">
+          <select name="connType" lay-verify="required" lay-filter="connType">
+            <option value="">请选择</option>
+            <option value="serial">串口 (Serial)</option>
+            <option value="tcp_server">TCP服务器 (TCP Server)</option>
+            <option value="tcp_client">TCP客户端 (TCP Client)</option>
+          </select>
+        </div>
+      </div>
+      <!-- 串口配置 -->
+      <div class="layui-form-item" id="serialConfig" style="display: none;">
+        <label class="layui-form-label">串口设备</label>
+        <div class="layui-input-block">
+          <input type="text" name="serialPort" placeholder="例如：COM1 或 /dev/ttyUSB0" class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item" id="baudRateConfig" style="display: none;">
+        <label class="layui-form-label">波特率</label>
+        <div class="layui-input-block">
+          <input type="number" name="baudRate" value="2400" min="1200" class="layui-input" />
+        </div>
+      </div>
+      <!-- TCP配置 -->
+      <div class="layui-form-item" id="tcpConfig" style="display: none;">
+        <label class="layui-form-label">TCP地址</label>
+        <div class="layui-input-block">
+          <input type="text" name="tcpAddress" placeholder="例如：0.0.0.0:8080 或 192.168.1.100:8080" class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item" id="reconnectConfig" style="display: none;">
+        <label class="layui-form-label">自动重连</label>
+        <div class="layui-input-block">
+          <input type="checkbox" name="reconnect" lay-skin="switch" lay-text="开启|关闭" />
+          <div class="layui-form-mid layui-word-aux">TCP客户端断开后自动重连</div>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">表计类型</label>
+        <div class="layui-input-block">
+          <select name="meterType" lay-verify="required">
+            <option value="">请选择</option>
+            <option value="16">水表 (0x10)</option>
+            <option value="48">气表 (0x30)</option>
+            <option value="64">电表 (0x40)</option>
+          </select>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">地址</label>
+        <div class="layui-input-block">
+          <input type="text" name="addr" placeholder="十进制地址，例如：23104870" lay-verify="required"
+            class="layui-input" />
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">累积流量</label>
+        <div class="layui-input-block">
+          <input type="number" name="flowData" placeholder="十进制数值，例如：20000" min="0" class="layui-input" />
+          <div class="layui-form-mid layui-word-aux">输入十进制数值，系统会自动转换为BCD码</div>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <label class="layui-form-label">状态字节</label>
+        <div class="layui-input-block">
+          <select name="status" lay-verify="required">
+            <option value="0">正常（开阀、电池正常、无报警）</option>
+            <option value="1">关阀</option>
+            <option value="2">阀门异常</option>
+            <option value="4">电池欠压</option>
+            <option value="5">关阀 + 电池欠压</option>
+            <option value="64">IT05异常</option>
+            <option value="192">未上电</option>
+            <option value="255">自定义（FF）</option>
+          </select>
+          <div class="layui-form-mid layui-word-aux">选择设备状态，系统会自动转换为对应的状态字节值</div>
+        </div>
+      </div>
+      <div class="layui-form-item">
+        <div class="layui-input-block">
+          <button class="layui-btn" lay-submit lay-filter="simulateBtn">启动设备</button>
+          <button type="button" class="layui-btn layui-btn-danger" id="stopSimulateBtn" style="display: none;">停止设备</button>
+        </div>
+      </div>
+    </form>
+    <div id="simulateStatus" class="simulate-status stopped" style="display: none;">
+      <div><strong>状态：</strong><span id="statusText">未运行</span></div>
+      <div style="margin-top: 5px;"><strong>设备ID：</strong><span id="taskId">-</span></div>
+    </div>
+    
+    <!-- 设备状态显示 -->
+    <div id="deviceStatusPanel" style="display: none; margin-top: 20px;">
+      <fieldset class="layui-elem-field">
+        <legend>设备状态</legend>
+        <div class="layui-field-box">
+          <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+            <div><strong>阀门状态：</strong><span id="valveStatus">开阀</span></div>
+            <div><strong>电池状态：</strong><span id="batteryStatus">正常</span></div>
+            <div><strong>累积流量：</strong><span id="flowData">0</span></div>
+            <div><strong>状态字节：</strong><span id="statusByte">0x00</span></div>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+    
+    <!-- 指令和事件日志 -->
+    <div id="deviceEventsPanel" style="display: none; margin-top: 20px;">
+      <fieldset class="layui-elem-field">
+        <legend>指令和事件日志</legend>
+        <div class="layui-field-box">
+          <div id="eventsLog" style="max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 12px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd;">
+            <div style="color: #999;">等待设备事件...</div>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+    
+    <div id="simulateResult" class="result-box" style="display: none; max-height: 300px;"></div>
+  </div>
+
+  <script src="../../lib/layui/layui.js"></script>
+  <script>
+    layui.use(['form', 'layer', 'jquery'], function () {
+      var form = layui.form;
+      var layer = layui.layer;
+      var $ = layui.jquery;
+
+      var currentTaskId = null;
+      var sendCount = 0;
+      var eventSource = null;
+
+      // 监听连接类型变化
+      form.on('select(connType)', function (data) {
+        updateConnTypeFields(data.value);
+      });
+
+      // 更新连接类型相关字段
+      function updateConnTypeFields(connType) {
+        if (connType === 'serial') {
+          $('#serialConfig').show();
+          $('#baudRateConfig').show();
+          $('#tcpConfig').hide();
+          $('#reconnectConfig').hide();
+        } else if (connType === 'tcp_server') {
+          $('#serialConfig').hide();
+          $('#baudRateConfig').hide();
+          $('#tcpConfig').show();
+          $('#reconnectConfig').hide();
+        } else if (connType === 'tcp_client') {
+          $('#serialConfig').hide();
+          $('#baudRateConfig').hide();
+          $('#tcpConfig').show();
+          $('#reconnectConfig').show();
+        } else {
+          $('#serialConfig').hide();
+          $('#baudRateConfig').hide();
+          $('#tcpConfig').hide();
+          $('#reconnectConfig').hide();
+        }
+        form.render();
+      }
+
+      // 监听帧类型变化，显示/隐藏应答帧字段
+      form.on('select(frameType)', function (data) {
+        if (data.value === 'reply') {
+          $('#replyFields').show();
+          $('#replyStatusField').show();
+        } else {
+          $('#replyFields').hide();
+          $('#replyStatusField').hide();
+        }
+      });
+
+      // 解析表单提交
+      form.on('submit(parseBtn)', function (data) {
+        var loadIndex = layer.load(1, { shade: [0.1, '#fff'] });
+
+        $.ajax({
+          url: '/api/cj188/parse',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(data.field),
+          success: function (res) {
+            layer.close(loadIndex);
+            if (res.success) {
+              displayParseResult(res);
+            } else {
+              layer.msg(res.message || '解析失败', { icon: 2 });
+            }
+          },
+          error: function (xhr) {
+            layer.close(loadIndex);
+            var msg = '网络错误';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+              msg = xhr.responseJSON.message;
+            }
+            layer.msg(msg, { icon: 2 });
+          }
+        });
+
+        return false;
+      });
+
+      // 构建表单提交
+      form.on('submit(buildBtn)', function (data) {
+        var field = data.field;
+        var buildData = {
+          meterType: parseInt(field.meterType),
+          addr: field.addr,
+          dataId: field.dataId,
+          serial: (function() { var s = parseInt(field.serial); return isNaN(s) ? 0 : s; })(),
+          frameType: field.frameType
+        };
+
+        // 如果是应答帧，处理累积流量
+        if (field.frameType === 'reply') {
+          if (field.flowData) {
+            // 将十六进制字符串转换为小端序字节数组
+            var hexValue = field.flowData.replace(/^0x/i, '');
+            if (hexValue.length % 2 !== 0) {
+              hexValue = '0' + hexValue;
+            }
+            // 转换为字节数组并反转（小端序）
+            var bytes = [];
+            for (var i = hexValue.length - 2; i >= 0; i -= 2) {
+              bytes.push(parseInt(hexValue.substr(i, 2), 16));
+            }
+            // 确保是4字节
+            while (bytes.length < 4) {
+              bytes.unshift(0);
+            }
+            buildData.flowData = bytes.slice(0, 4);
+          }
+          buildData.status = parseInt(field.status) || 0;
+        }
+
+        var loadIndex = layer.load(1, { shade: [0.1, '#fff'] });
+
+        $.ajax({
+          url: '/api/cj188/build',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(buildData),
+          success: function (res) {
+            layer.close(loadIndex);
+            if (res.success) {
+              displayBuildResult(res);
+            } else {
+              layer.msg(res.message || '构建失败', { icon: 2 });
+            }
+          },
+          error: function (xhr) {
+            layer.close(loadIndex);
+            var msg = '网络错误';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+              msg = xhr.responseJSON.message;
+            }
+            layer.msg(msg, { icon: 2 });
+          }
+        });
+
+        return false;
+      });
+
+      // 模拟表单提交
+      form.on('submit(simulateBtn)', function (data) {
+        var field = data.field;
+        
+        if (!field.connType) {
+          layer.msg('请选择连接类型', { icon: 2 });
+          return false;
+        }
+
+        var simulateData = {
+          connType: field.connType,
+          meterType: parseInt(field.meterType) || 16,
+          addr: field.addr,
+          status: parseInt(field.status) || 0
+        };
+
+        // 根据连接类型添加配置
+        if (field.connType === 'serial') {
+          if (!field.serialPort) {
+            layer.msg('请输入串口设备', { icon: 2 });
+            return false;
+          }
+          simulateData.serialPort = field.serialPort;
+          simulateData.baudRate = parseInt(field.baudRate) || 2400;
+        } else if (field.connType === 'tcp_server' || field.connType === 'tcp_client') {
+          if (!field.tcpAddress) {
+            layer.msg('请输入TCP地址', { icon: 2 });
+            return false;
+          }
+          simulateData.tcpAddress = field.tcpAddress;
+          if (field.connType === 'tcp_client') {
+            simulateData.reconnect = field.reconnect === 'on';
+          }
+        }
+
+        // 处理累积流量（将十进制数值转换为BCD码）
+        var flowValue = parseInt(field.flowData) || 0;
+        if (flowValue < 0) {
+          flowValue = 0;
+        }
+        // 将十进制数值转换为BCD码字节数组（4字节）
+        // 例如：20000 -> "00020000" -> [0x00, 0x02, 0x00, 0x00]
+        var flowStr = flowValue.toString().padStart(8, '0'); // 补齐到8位数字
+        var flowBytes = [];
+        for (var i = 0; i < 8; i += 2) {
+          var digit1 = parseInt(flowStr[i]) || 0;
+          var digit2 = parseInt(flowStr[i + 1]) || 0;
+          flowBytes.push((digit1 << 4) | digit2);
+        }
+        simulateData.flowData = flowBytes;
+
+        var loadIndex = layer.load(1, { shade: [0.1, '#fff'] });
+
+        $.ajax({
+          url: '/api/cj188/simulate',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify(simulateData),
+          success: function (res) {
+            layer.close(loadIndex);
+            if (res.success) {
+              currentTaskId = res.deviceId || res.taskId;
+              sendCount = 0;
+              $('#taskId').text(currentTaskId);
+              $('#sendCount').text('0');
+              $('#simulateStatus').removeClass('stopped').addClass('running').show();
+              $('#statusText').text('运行中');
+              $('#stopSimulateBtn').show();
+              
+              // 显示设备状态和事件面板
+              $('#deviceStatusPanel').show();
+              $('#deviceEventsPanel').show();
+              
+              // 连接设备事件SSE
+              connectDeviceEvents(currentTaskId);
+              
+              layer.msg('设备已启动', { icon: 1 });
+            } else {
+              layer.msg(res.message || '启动失败', { icon: 2 });
+            }
+          },
+          error: function (xhr) {
+            layer.close(loadIndex);
+            var msg = '网络错误';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+              msg = xhr.responseJSON.message;
+            }
+            layer.msg(msg, { icon: 2 });
+          }
+        });
+
+        return false;
+      });
+
+      // 连接设备事件SSE
+      function connectDeviceEvents(deviceId) {
+        // 关闭旧连接
+        if (eventSource) {
+          eventSource.close();
+        }
+        
+        // 连接新的SSE
+        eventSource = new EventSource('/api/cj188/events?deviceId=' + encodeURIComponent(deviceId));
+        
+        eventSource.onopen = function() {
+          addEventLog('已连接到设备事件流', 'info');
+        };
+        
+        eventSource.onerror = function(e) {
+          console.error('SSE连接错误:', e);
+          addEventLog('SSE连接错误', 'error');
+        };
+        
+        // 监听各种事件类型
+        eventSource.addEventListener('command_received', function(e) {
+          try {
+            var eventData = JSON.parse(e.data);
+            var data = eventData.data || {};
+            var commandType = data.commandType || '未知';
+            var commandDesc = data.commandDesc || '未知指令';
+            var hexData = data.hexData || '';
+            
+            // 格式化显示：事件类型 + 指令描述 + 报文
+            var message = '【收到指令】' + commandDesc;
+            if (hexData) {
+              message += '\n  报文: ' + formatHexData(hexData);
+            }
+            addEventLog(message, 'command');
+          } catch (err) {
+            console.error('解析command_received事件失败:', err);
+            addEventLog('【收到指令】解析失败: ' + e.data, 'error');
+          }
+        });
+        
+        eventSource.addEventListener('state_changed', function(e) {
+          try {
+            var eventData = JSON.parse(e.data);
+            var data = eventData.data || {};
+            var commandDesc = data.commandDesc || '未知指令';
+            var changes = data.changes || {};
+            var changeText = [];
+            
+            if (changes.valveStatus !== undefined) {
+              var valveText = ['开阀', '关阀', '异常', '未知'][changes.valveStatus] || '未知';
+              changeText.push('阀门: ' + valveText);
+              $('#valveStatus').text(valveText);
+            }
+            if (changes.batteryStatus !== undefined) {
+              var batteryText = changes.batteryStatus ? '欠压' : '正常';
+              changeText.push('电池: ' + batteryText);
+              $('#batteryStatus').text(batteryText);
+            }
+            if (changes.flowData !== undefined) {
+              changeText.push('流量: ' + changes.flowData);
+              $('#flowData').text(changes.flowData);
+            }
+            
+            // 格式化显示：事件类型 + 指令描述 + 状态变化
+            var message = '【状态变化】' + commandDesc;
+            if (changeText.length > 0) {
+              message += '\n  变化: ' + changeText.join(', ');
+            }
+            addEventLog(message, 'state');
+          } catch (err) {
+            console.error('解析state_changed事件失败:', err);
+            addEventLog('【状态变化】解析失败: ' + e.data, 'error');
+          }
+        });
+        
+        eventSource.addEventListener('reply_sent', function(e) {
+          try {
+            var eventData = JSON.parse(e.data);
+            var data = eventData.data || {};
+            var commandType = data.commandType || '未知';
+            var hexData = data.hexData || '';
+            
+            // 格式化显示：事件类型 + 报文
+            var message = '【发送应答】';
+            if (hexData) {
+              message += '\n  报文: ' + formatHexData(hexData);
+            } else {
+              message += '无报文数据';
+            }
+            addEventLog(message, 'reply');
+          } catch (err) {
+            console.error('解析reply_sent事件失败:', err);
+            addEventLog('【发送应答】解析失败: ' + e.data, 'error');
+          }
+        });
+        
+        eventSource.addEventListener('connected', function(e) {
+          var data = JSON.parse(e.data);
+          addEventLog(data.message || '已连接', 'info');
+        });
+      }
+      
+      // 格式化十六进制数据（每两个字符加空格，每16个字符换行）
+      function formatHexData(hexStr) {
+        if (!hexStr) return '';
+        // 移除空格
+        hexStr = hexStr.replace(/\s/g, '').toUpperCase();
+        // 每两个字符加空格
+        var formatted = '';
+        for (var i = 0; i < hexStr.length; i += 2) {
+          if (i > 0 && i % 32 === 0) {
+            formatted += '\n    ';
+          }
+          if (i > 0) {
+            formatted += ' ';
+          }
+          formatted += hexStr.substr(i, 2);
+        }
+        return formatted;
+      }
+      
+      // 添加事件日志
+      function addEventLog(message, type) {
+        var logDiv = $('#eventsLog');
+        var time = new Date().toLocaleTimeString();
+        var color = {
+          'info': '#999',
+          'command': '#1890ff',
+          'state': '#52c41a',
+          'reply': '#722ed1',
+          'error': '#ff4d4f'
+        }[type] || '#333';
+        
+        // 支持多行显示（使用pre标签或换行符）
+        var logEntry = $('<div style="margin-bottom: 8px; color: ' + color + '; white-space: pre-wrap; font-family: monospace; font-size: 12px; line-height: 1.4;">[' + time + '] ' + message + '</div>');
+        logDiv.append(logEntry);
+        
+        // 自动滚动到底部
+        logDiv.scrollTop(logDiv[0].scrollHeight);
+        
+        // 限制日志条数（保留最近100条）
+        var logs = logDiv.children();
+        if (logs.length > 100) {
+          logs.slice(0, logs.length - 100).remove();
+        }
+      }
+      
+      // 停止模拟
+      $('#stopSimulateBtn').on('click', function () {
+        if (!currentTaskId) {
+          return;
+        }
+
+        layer.confirm('确定要停止设备吗？', { icon: 3, title: '提示' }, function (index) {
+          $.ajax({
+            url: '/api/cj188/simulate/' + currentTaskId + '/stop',
+            type: 'POST',
+            success: function (res) {
+              layer.close(index);
+              if (res.success) {
+                // 关闭SSE连接
+                if (eventSource) {
+                  eventSource.close();
+                  eventSource = null;
+                }
+                
+                currentTaskId = null;
+                $('#simulateStatus').removeClass('running').addClass('stopped');
+                $('#statusText').text('已停止');
+                $('#stopSimulateBtn').hide();
+                $('#deviceStatusPanel').hide();
+                $('#deviceEventsPanel').hide();
+                layer.msg('设备已停止', { icon: 1 });
+              } else {
+                layer.msg(res.message || '停止失败', { icon: 2 });
+              }
+            },
+            error: function () {
+              layer.close(index);
+              layer.msg('网络错误', { icon: 2 });
+            }
+          });
+        });
+      });
+
+      // 显示解析结果
+      function displayParseResult(res) {
+        var html = '<div class="hex-display"><strong>十六进制数据：</strong><br>' + res.hexData + '</div>';
+        if (res.frame) {
+          html += '<div class="frame-info">';
+          html += '<div class="info-item"><span class="info-label">帧起始符：</span>0x' + res.frame.prefix.toString(16).toUpperCase().padStart(2, '0') + '</div>';
+          html += '<div class="info-item"><span class="info-label">表计类型：</span>' + res.frame.typeName + ' (0x' + res.frame.type.toString(16).toUpperCase().padStart(2, '0') + ')</div>';
+          html += '<div class="info-item"><span class="info-label">地址：</span>' + res.frame.addr + '</div>';
+          html += '<div class="info-item"><span class="info-label">控制码：</span>' + res.frame.ctrlName + ' (0x' + res.frame.control.toString(16).toUpperCase().padStart(2, '0') + ')</div>';
+          html += '<div class="info-item"><span class="info-label">数据域长度：</span>' + res.frame.len + '</div>';
+          html += '<div class="info-item"><span class="info-label">数据标识：</span>' + res.frame.dataId + '</div>';
+          html += '<div class="info-item"><span class="info-label">序列号：</span>0x' + res.frame.serial.toString(16).toUpperCase().padStart(2, '0') + '</div>';
+          html += '<div class="info-item"><span class="info-label">校验和：</span>0x' + res.frame.checksum.toString(16).toUpperCase().padStart(2, '0') + '</div>';
+          if (res.frame.flowData !== undefined) {
+            html += '<div class="info-item"><span class="info-label">累积流量：</span>' + res.frame.flowDataHex + ' (' + res.frame.flowData + ')</div>';
+            html += '<div class="info-item"><span class="info-label">阀门状态：</span>' + getValveStatusText(res.frame.valveStatus) + '</div>';
+            html += '<div class="info-item"><span class="info-label">电池状态：</span>' + (res.frame.batteryStatus ? '欠压' : '正常') + '</div>';
+            html += '<div class="info-item"><span class="info-label">IT05状态：</span>' + (res.frame.it05Status ? '异常' : '正常') + '</div>';
+            html += '<div class="info-item"><span class="info-label">报警器状态：</span>' + getAlarmStatusText(res.frame.alarmStatus) + '</div>';
+          }
+          html += '<div class="info-item"><span class="info-label">时间戳：</span>' + res.frame.timestamp + '</div>';
+          html += '</div>';
+        }
+        $('#parseResult').html(html).show();
+      }
+
+      // 显示构建结果
+      function displayBuildResult(res) {
+        var html = '<div class="hex-display"><strong>构建的十六进制数据：</strong><br>' + res.hexData + '</div>';
+        if (res.frame) {
+          html += '<div class="frame-info">';
+          html += '<div class="info-item"><span class="info-label">表计类型：</span>' + res.frame.typeName + '</div>';
+          html += '<div class="info-item"><span class="info-label">地址：</span>' + res.frame.addr + '</div>';
+          html += '<div class="info-item"><span class="info-label">控制码：</span>' + res.frame.ctrlName + '</div>';
+          html += '<div class="info-item"><span class="info-label">数据标识：</span>' + res.frame.dataId + '</div>';
+          if (res.frame.flowData !== undefined) {
+            html += '<div class="info-item"><span class="info-label">累积流量：</span>' + res.frame.flowDataHex + '</div>';
+          }
+          html += '</div>';
+        }
+        $('#buildResult').html(html).show();
+      }
+
+      // 获取阀门状态文本
+      function getValveStatusText(status) {
+        var statusMap = {
+          0: '开阀',
+          1: '关阀',
+          2: '异常',
+          3: '未知'
+        };
+        return statusMap[status] || '未知';
+      }
+
+      // 获取报警器状态文本
+      function getAlarmStatusText(status) {
+        var statusMap = {
+          0: '报警',
+          1: '上电',
+          3: '未上电'
+        };
+        return statusMap[status] || '未知';
+      }
+
+      // SSE连接
+      var eventSource = null;
+
+      // 连接SSE接收实时推送
+      function connectSSE() {
+        if (eventSource) {
+          return; // 已连接
+        }
+
+        eventSource = new EventSource('/sse');
+
+        eventSource.onopen = function () {
+          console.log('SSE连接已建立');
+        };
+
+        eventSource.addEventListener('connect', function (e) {
+          var data = JSON.parse(e.data);
+          console.log('SSE连接成功:', data);
+        });
+
+        eventSource.addEventListener('protocol', function (e) {
+          var eventData = JSON.parse(e.data);
+          handleProtocolEvent(eventData);
+        });
+
+        eventSource.onerror = function (e) {
+          console.error('SSE连接错误:', e);
+          // 尝试重连
+          setTimeout(function () {
+            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+              eventSource.close();
+              eventSource = null;
+              connectSSE();
+            }
+          }, 3000);
+        };
+      }
+
+      // 断开SSE连接
+      function disconnectSSE() {
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+      }
+
+      // 处理协议事件
+      function handleProtocolEvent(eventData) {
+        var data = typeof eventData.data === 'string' ? JSON.parse(eventData.data) : eventData.data;
+
+        if (eventData.topic === 'protocol.cj188.simulate') {
+          // 模拟数据事件
+          if (data.taskId === currentTaskId) {
+            sendCount++;
+            $('#sendCount').text(sendCount);
+            displaySimulateResult(data);
+          }
+        } else if (eventData.topic === 'protocol.cj188.parse') {
+          // 解析事件（可选：自动显示）
+          console.log('收到解析事件:', data);
+        } else if (eventData.topic === 'protocol.cj188.build') {
+          // 构建事件（可选：自动显示）
+          console.log('收到构建事件:', data);
+        }
+      }
+
+      // 显示模拟结果
+      function displaySimulateResult(data) {
+        var html = '<div style="margin-bottom: 10px; padding: 10px; background-color: #fff; border-left: 3px solid rgb(240, 97, 47);">';
+        html += '<div><strong>时间：</strong>' + data.frame.timestamp + '</div>';
+        html += '<div><strong>十六进制数据：</strong>' + data.hexData + '</div>';
+        if (data.frame.flowData !== undefined) {
+          html += '<div><strong>累积流量：</strong>' + data.frame.flowDataHex + ' (' + data.frame.flowData + ')</div>';
+        }
+        html += '<div><strong>发送次数：</strong>第 ' + data.count + ' 次</div>';
+        html += '</div>';
+
+        var $result = $('#simulateResult');
+        if ($result.children().length > 20) {
+          // 限制显示数量，移除最旧的
+          $result.children().last().remove();
+        }
+        $result.prepend(html).show();
+      }
+
+      // 页面加载时连接SSE
+      connectSSE();
+
+      // 页面卸载时断开SSE
+      $(window).on('beforeunload', function () {
+        disconnectSSE();
+      });
+    });
+  </script>
+</body>
+
+</html>
+

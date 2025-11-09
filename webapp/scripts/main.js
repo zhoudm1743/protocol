@@ -1,0 +1,139 @@
+layui.use(["layer", "form", "element", "jquery", "laytpl",], function() {
+  var element = layui.element;
+  var $ = layui.jquery;
+  var layer = layui.layer;
+
+  // 顶部 header 右侧导航，点击事件
+  $('.layui-header .layui-nav-item a').on('click', function () {
+    var src = $(this).attr('data-url')
+    $("#iframe").attr('src', src)
+  })
+
+  //监听导航点击
+  element.on("nav(leftNav)", function(elem) {
+    if (elem[0].tagName.toLowerCase() === "a") {
+      var navA = elem;
+      navA
+        .parents("li")
+        .siblings(".layui-nav-itemed")
+        .removeClass("layui-nav-itemed");
+    } else {
+      var navA = $(elem).find("a");
+    }
+    var url = navA.attr("data-url");
+
+    if (!url || url === "undefined") {
+      return;
+    }
+
+    var $iframe = $("#iframe");
+    if (url != $iframe.attr("src")) {
+      // 切换 iframe 地址
+      $iframe.attr("src", url);
+      locationHandler(url);
+      // 修改面包屑
+      breadCrumbHandler();
+    }
+  });
+
+  function locationHandler(url) {
+    window.location = "#" + url;
+  }
+
+  function breadCrumbHandler() {
+    // 根据左侧菜单动态设置面包屑
+    var html = '<a href="">能源工业协议系统</a>';
+
+    var $this = $("#sideNav .layui-this");
+    if (!$this.length) {
+      return false;
+    }
+
+    if ($this[0].tagName.toLowerCase() === "li") {
+      var $a = $this.find("a");
+      // html += '<a href="' + $a.attr('data-url') + '">' + $a.attr('data-text') + '</a>'
+      html += "<a >" + $a.attr("data-text") + "</a>";
+    } else {
+      // 二级面包屑
+      var $firstSibling = $this.parents(".layui-nav-child").siblings("a");
+      html += "<a >" + $firstSibling.attr("data-text") + "</a>";
+
+      // 三级面包屑
+      var $childA = $this.find("a");
+      html += "<a><cite>" + $childA.attr("data-text") + "</cite></a>";
+    }
+    $("#layui-breadcrumb").html(html);
+    element.render("breadcrumb", "layui-breadcrumb");
+  }
+
+  function initIframeSrc() {
+    var url = window.location.hash.split("#")[1];
+    if (!url) {
+      return false;
+    }
+
+    // 修改 iframe 路径
+    $("#iframe").attr("src", url);
+
+    // 对左侧菜单展开和选中状态进行修正
+    var checkedItem = menuList.find(function(item) {
+      if (item.href === url) {
+        return true;
+      }
+
+      if (item.children && item.children.length) {
+        var flag = item.children.find(function(item2) {
+          return item2.href === url;
+        });
+        if (flag) {
+          return true;
+        }
+      }
+    });
+
+    // 取消全部的高亮状态
+    menuList.map(function(item) {
+      item.checked = false;
+      item.this = false;
+      if (item.children && item.children.length) {
+        item.children.map(function(item2) {
+          item2.checked = false;
+          item2.this = false;
+        });
+      }
+    });
+
+    // 高亮对应的
+    checkedItem.itemed = true;
+    if (checkedItem.href === url) {
+      checkedItem.this = true;
+    } else {
+      checkedItem.children.forEach(function(item) {
+        if (item.href === url) {
+          item.this = true;
+        }
+      });
+    }
+  }
+
+  var laytpl = layui.laytpl;
+  var menuList = [
+    { title: "首页", href: "./pages/home/index.html", this: true },
+    {
+      title: "协议管理",
+      children: [
+        { title: "CJ188协议", href: "./pages/protocol/cj188.html" }
+      ]
+    }
+  ];
+
+  initIframeSrc();
+  var getTpl = sideNavTemplate.innerHTML;
+  var view = document.getElementById("sideNav");
+  laytpl(getTpl).render(menuList, function(html) {
+    // 渲染左侧菜单
+    view.innerHTML = html;
+    element.render('nav', 'leftNav')
+    breadCrumbHandler();
+  });
+});

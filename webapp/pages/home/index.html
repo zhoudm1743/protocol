@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="renderer" content="webkit" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>能源工业协议系统 - 首页</title>
+  <link rel="stylesheet" type="text/css" href="../../lib/layui/css/layui.css" />
+  <style>
+    body {
+      padding-right: 20px;
+    }
+
+    /* 水平线 */
+    .hr {
+      height: 2px;
+      background-color: rgb(204, 204, 204);
+    }
+    .hr-primary {
+      height: 2px;
+      background-color: rgb(240, 97, 47);
+    }
+
+
+    /* 部分公用代码 */
+    .home-page .wrap {
+      background-color: #fff;
+      margin-bottom: 30px;
+    }
+    .home-page .wrap .title,
+    .home-page .wrap li {
+      padding-left: 20px;
+      padding-right: 20px;
+    }
+    .home-page .wrap li {
+      padding-top: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #f2f2f2;
+    }
+    .home-page .wrap ul li:last-child {
+      border: none;
+    }
+    .home-page .wrap .title {
+      font-size: 18px;
+      height: 36px;
+      line-height: 36px;
+    }
+
+    /* 抢单部分 */
+    .order-box .content {
+      padding: 0 20px;
+    }
+    .order-box .content .meta {
+      border-bottom: 1px solid #ccc;
+      height: 30px;
+      line-height: 30px;
+      padding: 6px 0;
+    }
+    .order-box .content .meta span {
+      margin-right: 20px;
+    }
+    .order-box .content .desc {
+      padding: 10px 0 20px;
+    }
+    
+    .order-box .get-order-btn {
+      margin: 10px 20px;
+      height: 30px;
+      line-height: 30px;
+      border: none;
+      border-radius: 5px;
+      color: #fff;
+      background-color: rgb(240, 97, 47);
+    }
+    .order-box .get-order-btn:hover {
+      border: none;
+      color: #fff;
+      background-color: rgb(240, 97, 47);
+    }
+    .order-box > .meta {
+      height: 50px;
+      line-height: 50px;
+      margin-right: 15px;
+    }
+    .order-box > .meta .close-btn:hover {
+      color: rgb(240, 97, 47);
+    }
+    .order-box > .meta .close-btn {
+      margin-left: 20px;
+      cursor: pointer;
+      color: #666;
+    }
+
+    /* 消息通知 */
+    .inform li span,
+    .message li span {
+      float: right;
+    }
+
+    /* header 商家介绍部分 */
+    .home-page .header li {
+      margin: 0 10px;
+      border: 0;
+      display: inline-block;
+    }
+    .header .rightbox li .icon {
+      width: 60px;
+      height: 60px;
+      display: inline-block;
+      background-color: rgb(240, 97, 47);;
+      border-radius: 50%;
+    }
+    .header .rightbox li .sub-title,
+    .header .rightbox li .number {
+      text-align: center;
+    }
+    .header .rightbox li .number {
+      color: rgb(240, 97, 47);
+      font-weight: bold;
+    }
+    .dib {
+      display: inline-block;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="home-page layui-row layui-col-space30">
+    <div class="layui-col-xs12">
+      <!-- 系统介绍 -->
+      <div class="wrap">
+        <h4 class="title">系统介绍</h4>
+        <div class="hr"></div>
+        <div style="padding: 20px;">
+          <h3 style="color: rgb(240, 97, 47); margin-bottom: 15px;">能源工业协议系统</h3>
+          <p style="line-height: 1.8; margin-bottom: 15px;">
+            本系统用于能源工业协议的解析、生成和模拟，支持多种协议标准。
+          </p>
+          <p style="line-height: 1.8; margin-bottom: 15px;">
+            <strong>已支持协议：</strong>
+          </p>
+          <ul style="line-height: 2;">
+            <li>• CJ188 - 户用计量仪表数据传输技术条件</li>
+            <li>• DLT645 - 多功能电能表通信规约（开发中）</li>
+            <li>• Modbus - 工业通信协议（开发中）</li>
+            <li>• 3761 - 电力用户用电信息采集系统通信协议（开发中）</li>
+            <li>• CAT1 - 4G通信协议（开发中）</li>
+          </ul>
+        </div>
+      </div>
+      <!-- 功能说明 -->
+      <div class="wrap">
+        <h4 class="title">功能说明</h4>
+        <div class="hr"></div>
+        <div style="padding: 20px;">
+          <div style="margin-bottom: 20px;">
+            <h4 style="color: rgb(240, 97, 47); margin-bottom: 10px;">协议解析</h4>
+            <p style="line-height: 1.8;">输入十六进制数据，系统自动解析协议帧，显示详细的帧结构信息，包括表计类型、地址、控制码、数据域等。</p>
+          </div>
+          <div style="margin-bottom: 20px;">
+            <h4 style="color: rgb(240, 97, 47); margin-bottom: 10px;">协议构建</h4>
+            <p style="line-height: 1.8;">根据输入的参数构建协议帧，支持查询帧和应答帧的构建，自动计算校验和，生成完整的协议数据。</p>
+          </div>
+          <div style="margin-bottom: 20px;">
+            <h4 style="color: rgb(240, 97, 47); margin-bottom: 10px;">协议模拟</h4>
+            <p style="line-height: 1.8;">模拟设备发送协议数据，支持定时发送，实时显示模拟数据，方便测试和调试。</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="../../lib/layui/layui.js"></script>
+</body>
+
+</html>
