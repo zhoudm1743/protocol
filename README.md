@@ -1,4 +1,4 @@
-# 能源工业协议系统
+# 能源工业协议
 
 一个基于 Go 语言实现的能源工业协议解析、构建和模拟系统，支持多种工业通信协议的开发、测试和调试。
 
@@ -68,7 +68,7 @@ protocol/
 
 1. 克隆项目
 ```bash
-git clone <repository-url>
+git clone https://gitee.com/illusoryNone/protocol.git
 cd protocol
 ```
 
