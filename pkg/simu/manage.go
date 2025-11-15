@@ -41,16 +41,22 @@ type DeviceConfig struct {
 // DeviceState 设备状态（通用状态存储，支持不同协议的各种状态字段）
 // 使用map存储状态，支持：
 // - CJ188: valveStatus(int), batteryStatus(bool), it05Status(bool), alarmStatus(int), flowData(uint32)
+// - DLT645-2007: meterData(float64), ia/ib/ic(float64), va/vb/vc(float64), frequency(float64), relayStatus(bool)
 // - 3761/CAT.1: signalStatus(int), imei(string), powerConsumption(float64), voltage(float64) 等
 type DeviceState struct {
-	state map[string]interface{} // 状态字段映射，key为字段名，value为任意类型
-	mu    sync.RWMutex
+	state      map[string]interface{} // 状态字段映射，key为字段名，value为任意类型
+	mu         sync.RWMutex
+	createdAt  time.Time              // 创建时间
+	updatedAt  time.Time              // 最后更新时间
 }
 
 // NewDeviceState 创建设备状态
 func NewDeviceState() *DeviceState {
+	now := time.Now()
 	return &DeviceState{
-		state: make(map[string]interface{}),
+		state:     make(map[string]interface{}),
+		createdAt: now,
+		updatedAt: now,
 	}
 }
 
@@ -67,6 +73,7 @@ func (s *DeviceState) Set(key string, value interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state[key] = value
+	s.updatedAt = time.Now()
 }
 
 // GetString 获取字符串类型状态值（如IMEI）
@@ -177,6 +184,51 @@ func (s *DeviceState) GetAll() map[string]interface{} {
 	return result
 }
 
+// GetUpdateTime 获取最后更新时间
+func (s *DeviceState) GetUpdateTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.updatedAt
+}
+
+// GetCreateTime 获取创建时间
+func (s *DeviceState) GetCreateTime() time.Time {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.createdAt
+}
+
+// Clear 清空状态
+func (s *DeviceState) Clear() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state = make(map[string]interface{})
+	s.updatedAt = time.Now()
+}
+
+// Delete 删除状态值
+func (s *DeviceState) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.state, key)
+	s.updatedAt = time.Now()
+}
+
+// Has 检查是否存在指定键
+func (s *DeviceState) Has(key string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, exists := s.state[key]
+	return exists
+}
+
+// Count 获取状态字段数量
+func (s *DeviceState) Count() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.state)
+}
+
 // GetStatusByte 获取状态字节（CJ188协议专用，根据状态字段计算状态字节）
 func (s *DeviceState) GetStatusByte() byte {
 	s.mu.RLock()
@@ -211,9 +263,129 @@ func (d *BaseDevice) SetEventCallback(callback func(eventType string, data map[s
 	d.eventCallback = callback
 }
 
+// StartStatusUpdate 启动状态更新推送（定期推送设备状态和统计信息）
+func (d *BaseDevice) StartStatusUpdate(interval time.Duration) {
+	if interval <= 0 {
+		interval = 3 * time.Second // 默认3秒
+	}
+	
+	d.statusUpdateEnabled = true
+	d.statusUpdateChan = make(chan struct{})
+	
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-d.statusUpdateChan:
+				return
+			case <-ticker.C:
+				// 推送状态更新事件
+				if d.eventCallback != nil {
+					stateData := d.state.GetAll()
+					statsSnapshot := d.statistics.GetSnapshot()
+					
+					d.eventCallback("status_update", map[string]interface{}{
+						"state":      stateData,
+						"statistics": statsSnapshot,
+					})
+				}
+			}
+		}
+	}()
+}
+
+// StopStatusUpdate 停止状态更新推送
+func (d *BaseDevice) StopStatusUpdate() {
+	if d.statusUpdateEnabled && d.statusUpdateChan != nil {
+		close(d.statusUpdateChan)
+		d.statusUpdateEnabled = false
+	}
+}
+
 // GetState 获取设备状态
 func (d *BaseDevice) GetState() *DeviceState {
 	return d.state
+}
+
+// DeviceStatistics 设备统计信息
+type DeviceStatistics struct {
+	RequestCount   uint64    // 接收请求次数
+	ResponseCount  uint64    // 发送应答次数
+	ErrorCount     uint64    // 错误次数
+	BytesReceived  uint64    // 接收字节数
+	BytesSent      uint64    // 发送字节数
+	StartTime      time.Time // 启动时间
+	LastActiveTime time.Time // 最后活跃时间
+	mu             sync.RWMutex
+}
+
+// NewDeviceStatistics 创建设备统计信息
+func NewDeviceStatistics() *DeviceStatistics {
+	now := time.Now()
+	return &DeviceStatistics{
+		StartTime:      now,
+		LastActiveTime: now,
+	}
+}
+
+// IncrementRequest 增加请求计数
+func (s *DeviceStatistics) IncrementRequest(bytes int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.RequestCount++
+	s.BytesReceived += uint64(bytes)
+	s.LastActiveTime = time.Now()
+}
+
+// IncrementResponse 增加应答计数
+func (s *DeviceStatistics) IncrementResponse(bytes int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ResponseCount++
+	s.BytesSent += uint64(bytes)
+	s.LastActiveTime = time.Now()
+}
+
+// IncrementError 增加错误计数
+func (s *DeviceStatistics) IncrementError() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ErrorCount++
+	s.LastActiveTime = time.Now()
+}
+
+// GetSnapshot 获取统计快照
+func (s *DeviceStatistics) GetSnapshot() map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	uptime := time.Since(s.StartTime)
+	idle := time.Since(s.LastActiveTime)
+	return map[string]interface{}{
+		"requestCount":   s.RequestCount,
+		"responseCount":  s.ResponseCount,
+		"errorCount":     s.ErrorCount,
+		"bytesReceived":  s.BytesReceived,
+		"bytesSent":      s.BytesSent,
+		"startTime":      s.StartTime.Format("2006-01-02 15:04:05"),
+		"lastActiveTime": s.LastActiveTime.Format("2006-01-02 15:04:05"),
+		"uptimeSeconds":  uptime.Seconds(),
+		"idleSeconds":    idle.Seconds(),
+	}
+}
+
+// Reset 重置统计信息
+func (s *DeviceStatistics) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.RequestCount = 0
+	s.ResponseCount = 0
+	s.ErrorCount = 0
+	s.BytesReceived = 0
+	s.BytesSent = 0
+	s.StartTime = time.Now()
+	s.LastActiveTime = time.Now()
 }
 
 // Device 模拟设备接口
@@ -222,6 +394,8 @@ type Device interface {
 	Stop() error
 	IsRunning() bool
 	GetConfig() *DeviceConfig
+	GetStatistics() *DeviceStatistics
+	GetState() *DeviceState
 }
 
 // Manager 模拟器管理器
@@ -230,6 +404,9 @@ type Manager struct {
 	protocolHandlers map[string]ProtocolHandler
 	mu               sync.RWMutex
 	protocolMu       sync.RWMutex
+	healthCheckInterval time.Duration // 健康检查间隔
+	healthCheckEnabled  bool          // 是否启用健康检查
+	healthCheckStop     chan struct{} // 健康检查停止通道
 }
 
 var defaultManager *Manager
@@ -239,11 +416,26 @@ var managerOnce sync.Once
 func GetDefaultManager() *Manager {
 	managerOnce.Do(func() {
 		defaultManager = &Manager{
-			devices:          make(map[string]Device),
-			protocolHandlers: make(map[string]ProtocolHandler),
+			devices:             make(map[string]Device),
+			protocolHandlers:    make(map[string]ProtocolHandler),
+			healthCheckInterval: 30 * time.Second,
+			healthCheckStop:     make(chan struct{}),
 		}
+		// 自动注册内置协议处理器
+		defaultManager.registerBuiltinHandlers()
 	})
 	return defaultManager
+}
+
+// registerBuiltinHandlers 注册内置协议处理器
+func (m *Manager) registerBuiltinHandlers() {
+	// 注册CJ188协议处理器
+	m.RegisterProtocolHandler("cj188", NewCJ188Handler())
+	logger.Infof("[模拟器管理器] 自动注册CJ188协议处理器")
+	
+	// 注册DLT645-2007协议处理器
+	m.RegisterProtocolHandler("dlt645-2007", NewDLT645_2007Handler())
+	logger.Infof("[模拟器管理器] 自动注册DLT645-2007协议处理器")
 }
 
 // RegisterProtocolHandler 注册协议处理器
@@ -310,34 +502,174 @@ func (m *Manager) ListDevices() map[string]Device {
 	return result
 }
 
+// CountDevices 统计设备数量
+func (m *Manager) CountDevices() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.devices)
+}
+
+// GetDevicesByProtocol 按协议类型获取设备
+func (m *Manager) GetDevicesByProtocol(protocolType string) []Device {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var result []Device
+	for _, device := range m.devices {
+		if device.GetConfig().ProtocolType == protocolType {
+			result = append(result, device)
+		}
+	}
+	return result
+}
+
+// StopAllDevices 停止所有设备
+func (m *Manager) StopAllDevices() error {
+	m.mu.RLock()
+	deviceList := make([]Device, 0, len(m.devices))
+	for _, device := range m.devices {
+		deviceList = append(deviceList, device)
+	}
+	m.mu.RUnlock()
+	
+	var errors []string
+	for _, device := range deviceList {
+		if device.IsRunning() {
+			if err := device.Stop(); err != nil {
+				errors = append(errors, err.Error())
+			}
+		}
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("停止部分设备失败: %s", strings.Join(errors, "; "))
+	}
+	return nil
+}
+
+// GetStatistics 获取所有设备统计信息
+func (m *Manager) GetStatistics() map[string]map[string]interface{} {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make(map[string]map[string]interface{})
+	for id, device := range m.devices {
+		result[id] = device.GetStatistics().GetSnapshot()
+	}
+	return result
+}
+
+// EnableHealthCheck 启用健康检查
+func (m *Manager) EnableHealthCheck(interval time.Duration) {
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	m.healthCheckInterval = interval
+	m.healthCheckEnabled = true
+	go m.runHealthCheck()
+	logger.Infof("[模拟器管理器] 启用健康检查，间隔: %v", interval)
+}
+
+// DisableHealthCheck 禁用健康检查
+func (m *Manager) DisableHealthCheck() {
+	m.healthCheckEnabled = false
+	if m.healthCheckStop != nil {
+		close(m.healthCheckStop)
+		m.healthCheckStop = make(chan struct{})
+	}
+	logger.Infof("[模拟器管理器] 禁用健康检查")
+}
+
+// runHealthCheck 运行健康检查
+func (m *Manager) runHealthCheck() {
+	ticker := time.NewTicker(m.healthCheckInterval)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-m.healthCheckStop:
+			return
+		case <-ticker.C:
+			m.performHealthCheck()
+		}
+	}
+}
+
+// performHealthCheck 执行健康检查
+func (m *Manager) performHealthCheck() {
+	m.mu.RLock()
+	deviceList := make([]struct{
+		id string
+		device Device
+	}, 0, len(m.devices))
+	for id, device := range m.devices {
+		deviceList = append(deviceList, struct{
+			id string
+			device Device
+		}{id, device})
+	}
+	m.mu.RUnlock()
+	
+	for _, item := range deviceList {
+		if !item.device.IsRunning() {
+			logger.Warnf("[健康检查] 设备 %s 未运行", item.id)
+			continue
+		}
+		
+		stats := item.device.GetStatistics()
+		snapshot := stats.GetSnapshot()
+		idleSeconds := snapshot["idleSeconds"].(float64)
+		
+		// 如果设备空闲时间超过5分钟，记录警告
+		if idleSeconds > 300 {
+			logger.Warnf("[健康检查] 设备 %s 空闲时间过长: %.0f秒", item.id, idleSeconds)
+		}
+	}
+}
+
 // BaseDevice 基础设备结构（包含协议处理逻辑）
 type BaseDevice struct {
-	config         *DeviceConfig
-	manager        *Manager
-	state          *DeviceState  // 设备状态
-	reportInterval time.Duration // 主动上报间隔（0表示不上报）
-	reportEnabled  bool          // 是否启用主动上报
-	reportChan     chan struct{} // 上报触发通道
-	reportMu       sync.RWMutex
-	eventCallback  func(eventType string, data map[string]interface{}) // 事件回调函数
+	config              *DeviceConfig
+	manager             *Manager
+	state               *DeviceState       // 设备状态
+	statistics          *DeviceStatistics  // 设备统计信息
+	reportInterval      time.Duration      // 主动上报间隔（0表示不上报）
+	reportEnabled       bool               // 是否启用主动上报
+	reportChan          chan struct{}      // 上报触发通道
+	reportMu            sync.RWMutex
+	eventCallback       func(eventType string, data map[string]interface{}) // 事件回调函数
+	statusUpdateEnabled bool               // 是否启用状态更新推送
+	statusUpdateChan    chan struct{}      // 状态更新停止通道
 }
 
 // handleRequest 处理请求（通用方法）
 func (d *BaseDevice) handleRequest(data []byte) ([]byte, error) {
+	// 记录接收统计
+	if d.statistics != nil {
+		d.statistics.IncrementRequest(len(data))
+	}
+	
 	// 获取协议处理器
 	handler, err := d.manager.GetProtocolHandler(d.config.ProtocolType)
 	if err != nil {
+		if d.statistics != nil {
+			d.statistics.IncrementError()
+		}
 		return nil, fmt.Errorf("获取协议处理器失败: %v", err)
 	}
 
 	// 解析请求
 	request, err := handler.ParseRequest(data)
 	if err != nil {
+		if d.statistics != nil {
+			d.statistics.IncrementError()
+		}
 		return nil, fmt.Errorf("解析请求失败: %v", err)
 	}
 
 	// 验证地址
 	if !handler.ValidateAddress(request, d.config) {
+		if d.statistics != nil {
+			d.statistics.IncrementError()
+		}
 		return nil, fmt.Errorf("地址验证失败")
 	}
 
@@ -383,7 +715,15 @@ func (d *BaseDevice) handleRequest(data []byte) ([]byte, error) {
 
 	reply, err = handler.BuildReply(request, d.config)
 	if err != nil {
+		if d.statistics != nil {
+			d.statistics.IncrementError()
+		}
 		return nil, fmt.Errorf("构建应答失败: %v", err)
+	}
+
+	// 记录发送统计
+	if d.statistics != nil && reply != nil {
+		d.statistics.IncrementResponse(len(reply))
 	}
 
 	// 发布应答事件
@@ -480,8 +820,10 @@ type SerialDevice struct {
 func NewSerialDevice(config *DeviceConfig, port string, baudRate int, manager *Manager) *SerialDevice {
 	return &SerialDevice{
 		BaseDevice: BaseDevice{
-			config:  config,
-			manager: manager,
+			config:     config,
+			manager:    manager,
+			state:      NewDeviceState(),
+			statistics: NewDeviceStatistics(),
 		},
 		port:     port,
 		baudRate: baudRate,
@@ -492,6 +834,16 @@ func NewSerialDevice(config *DeviceConfig, port string, baudRate int, manager *M
 // GetConfig 获取配置
 func (d *SerialDevice) GetConfig() *DeviceConfig {
 	return d.config
+}
+
+// GetStatistics 获取统计信息
+func (d *SerialDevice) GetStatistics() *DeviceStatistics {
+	return d.statistics
+}
+
+// GetState 获取设备状态
+func (d *SerialDevice) GetState() *DeviceState {
+	return d.state
 }
 
 // IsRunning 是否运行中
@@ -551,6 +903,7 @@ func NewTCPServerDevice(config *DeviceConfig, address string, manager *Manager) 
 			config:     config,
 			manager:    manager,
 			state:      NewDeviceState(),
+			statistics: NewDeviceStatistics(),
 			reportChan: make(chan struct{}),
 		},
 		address:  address,
@@ -562,6 +915,16 @@ func NewTCPServerDevice(config *DeviceConfig, address string, manager *Manager) 
 // GetConfig 获取配置
 func (d *TCPServerDevice) GetConfig() *DeviceConfig {
 	return d.config
+}
+
+// GetStatistics 获取统计信息
+func (d *TCPServerDevice) GetStatistics() *DeviceStatistics {
+	return d.statistics
+}
+
+// GetState 获取设备状态
+func (d *TCPServerDevice) GetState() *DeviceState {
+	return d.state
 }
 
 // IsRunning 是否运行中
@@ -774,6 +1137,7 @@ func NewTCPClientDevice(config *DeviceConfig, address string, reconnect bool, ma
 			config:     config,
 			manager:    manager,
 			state:      NewDeviceState(),
+			statistics: NewDeviceStatistics(),
 			reportChan: make(chan struct{}),
 		},
 		address:   address,
@@ -785,6 +1149,16 @@ func NewTCPClientDevice(config *DeviceConfig, address string, reconnect bool, ma
 // GetConfig 获取配置
 func (d *TCPClientDevice) GetConfig() *DeviceConfig {
 	return d.config
+}
+
+// GetStatistics 获取统计信息
+func (d *TCPClientDevice) GetStatistics() *DeviceStatistics {
+	return d.statistics
+}
+
+// GetState 获取设备状态
+func (d *TCPClientDevice) GetState() *DeviceState {
+	return d.state
 }
 
 // IsRunning 是否运行中

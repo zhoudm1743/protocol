@@ -1,37 +1,24 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"protocol/app/dto"
 	"protocol/pkg/eventbus"
 	"protocol/pkg/simu"
-	"protocol/protocol/cj188"
+	dlt645_2007 "protocol/protocol/dlt645-2007"
 	"protocol/utils"
-
-	"context"
 
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	simulateTasks = make(map[string]*simulateTask)
-	simulateMu    sync.RWMutex
-)
-
-type simulateTask struct {
-	ID       string
-	StopChan chan struct{}
-	Running  bool
-}
-
-// ParseCj188 解析CJ188协议帧
-func ParseCj188(c *gin.Context) {
+// ParseDlt645_2007 解析DLT645-2007协议帧
+func ParseDlt645_2007(c *gin.Context) {
 	var req dto.ParseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -53,18 +40,18 @@ func ParseCj188(c *gin.Context) {
 	}
 
 	// 解析协议帧
-	frame, err := cj188.Parser188(bytes)
-	if err != nil {
-		c.JSON(http.StatusOK, dto.FrameResponse{
+	result := dlt645_2007.ParsePacket(bytes)
+	if !result.Flag {
+		c.JSON(http.StatusOK, dto.Dlt645_2007Response{
 			Success:   false,
-			Message:   fmt.Sprintf("解析失败: %v", err),
+			Message:   "解析失败",
 			Timestamp: time.Now(),
 		})
 		return
 	}
 
 	// 转换为DTO
-	frameDTO := dto.ToFrameDTO(frame)
+	frameDTO := dto.ToDlt645_2007DTO(&result)
 	hexStr := utils.HexTool.ToHexString(bytes)
 
 	// 发布事件到eventbus
@@ -74,9 +61,9 @@ func ParseCj188(c *gin.Context) {
 		"hexData": hexStr,
 	}
 	eventDataBytes, _ := json.Marshal(eventData)
-	eventbus.PublishAsync(eventbus.NewEvent("protocol.cj188.parse", string(eventDataBytes)))
+	eventbus.PublishAsync(eventbus.NewEvent("protocol.dlt645-2007.parse", string(eventDataBytes)))
 
-	c.JSON(http.StatusOK, dto.FrameResponse{
+	c.JSON(http.StatusOK, dto.Dlt645_2007Response{
 		Success:   true,
 		Message:   "解析成功",
 		HexData:   hexStr,
@@ -85,9 +72,9 @@ func ParseCj188(c *gin.Context) {
 	})
 }
 
-// BuildCj188 构建CJ188协议帧
-func BuildCj188(c *gin.Context) {
-	var req dto.BuildRequest
+// BuildDlt645_2007 构建DLT645-2007协议帧
+func BuildDlt645_2007(c *gin.Context) {
+	var req dto.BuildDlt645_2007Request
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -96,155 +83,96 @@ func BuildCj188(c *gin.Context) {
 		return
 	}
 
-	// 转换数据标识
-	dataIDBytes, err := hexStringToBytes(req.DataID)
-	if err != nil || len(dataIDBytes) != 2 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "数据标识格式错误，需要4位十六进制字符串（2字节）",
-		})
-		return
-	}
-
 	var frameBytes []byte
-	var frame *cj188.Cj188Frame
-
-	// 使用用户指定的序列号（允许为0）
-	serial := req.Serial
 
 	// 根据帧类型构建
 	switch req.FrameType {
-	case "read":
-		// 构建查询帧
-		frameBytes, err = cj188.Build188(req.MeterType, req.Addr, dataIDBytes, serial)
+	// 新版：读数据
+	case "read_energy_positive":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_ENERGY_POSITIVE)
+	case "read_energy_combined":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_ENERGY_COMBINED)
+	case "read_energy_reverse":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_ENERGY_REVERSE)
+	case "read_voltage_a":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_VOLTAGE_A)
+	case "read_voltage_b":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_VOLTAGE_B)
+	case "read_voltage_c":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_VOLTAGE_C)
+	case "read_current_a":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_CURRENT_A)
+	case "read_current_b":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_CURRENT_B)
+	case "read_current_c":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_CURRENT_C)
+	case "read_power_a":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_POWER_ACTIVE_A)
+	case "read_power_total":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_POWER_ACTIVE_TOTAL)
+	case "read_frequency":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_FREQUENCY)
+	case "read_power_factor":
+		frameBytes = dlt645_2007.BuildReadDataPacket(req.Addr, dlt645_2007.DATA_ID_POWER_FACTOR_TOTAL)
+	case "read_comm_addr":
+		frameBytes = dlt645_2007.ReadCommAddr(req.Addr)
+	
+	// 新版：写数据（需要dataId和writeData参数）
+	case "write_data":
+		if req.DataID == "" || req.WriteData == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "写数据需要提供数据标识和写入数据",
+			})
+			return
+		}
+		dataID, err := hexStringToBytes645(req.DataID)
+		if err != nil || len(dataID) != 4 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": "数据标识格式错误，需要4字节十六进制",
+			})
+			return
+		}
+		writeData, err := hexStringToBytes645(req.WriteData)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"success": false,
-				"message": fmt.Sprintf("构建查询帧失败: %v", err),
+				"message": "写入数据格式错误",
 			})
 			return
 		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
-	case "reply":
-		// 构建应答帧
-		if len(req.FlowData) != 4 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": "累积流量数据长度错误，需要4字节",
-			})
-			return
-		}
-		frameBytes, err = cj188.Build188Reply(req.MeterType, req.Addr, dataIDBytes, serial, req.FlowData, req.Status)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("构建应答帧失败: %v", err),
-			})
-			return
-		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
-	case "control_close":
-		// 构建关阀指令
-		frameBytes, err = cj188.Build188Control(req.MeterType, req.Addr, dataIDBytes, serial, 0x1A)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("构建关阀指令失败: %v", err),
-			})
-			return
-		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
-	case "control_open":
-		// 构建开阀指令
-		frameBytes, err = cj188.Build188Control(req.MeterType, req.Addr, dataIDBytes, serial, 0x1B)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("构建开阀指令失败: %v", err),
-			})
-			return
-		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
-	case "control_reply_close":
-		// 构建关阀应答
-		frameBytes, err = cj188.Build188ControlReply(req.MeterType, req.Addr, dataIDBytes, serial, 0x1A, 0x00)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("构建关阀应答失败: %v", err),
-			})
-			return
-		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
-	case "control_reply_open":
-		// 构建开阀应答
-		frameBytes, err = cj188.Build188ControlReply(req.MeterType, req.Addr, dataIDBytes, serial, 0x1B, 0x00)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("构建开阀应答失败: %v", err),
-			})
-			return
-		}
-		frame, err = cj188.Parser188(frameBytes)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"success": false,
-				"message": fmt.Sprintf("验证构建的帧失败: %v", err),
-			})
-			return
-		}
-
+		frameBytes = dlt645_2007.BuildWriteDataPacket(req.Addr, dataID, writeData)
+	
+	// 新版：控制命令
+	case "control_on":
+		frameBytes = dlt645_2007.TurnOnPacket(req.Addr)
+	case "control_off":
+		frameBytes = dlt645_2007.TurnOffPacket(req.Addr)
+	
+	// 旧版兼容
+	case "read_0010":
+		frameBytes = dlt645_2007.ReadPacket0010(req.Addr)
+	case "read_0000":
+		frameBytes = dlt645_2007.ReadPacket0000(req.Addr)
+	case "read_0f22":
+		frameBytes = dlt645_2007.ReadPacket0F22(req.Addr)
+	case "turn_on":
+		frameBytes = dlt645_2007.TurnOnPacket(req.Addr)
+	case "turn_off":
+		frameBytes = dlt645_2007.TurnOffPacket(req.Addr)
+	
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
-			"message": "帧类型错误，支持: read, reply, control_close, control_open, control_reply_close, control_reply_open",
+			"message": "帧类型错误",
 		})
 		return
 	}
 
-	// 转换为DTO
-	frameDTO := dto.ToFrameDTO(frame)
+	// 解析构建的帧以获取完整信息
+	result := dlt645_2007.ParsePacket(frameBytes)
+	frameDTO := dto.ToDlt645_2007DTO(&result)
 	hexStr := utils.HexTool.ToHexString(frameBytes)
 
 	// 发布事件到eventbus
@@ -254,9 +182,9 @@ func BuildCj188(c *gin.Context) {
 		"hexData": hexStr,
 	}
 	eventDataBytes, _ := json.Marshal(eventData)
-	eventbus.PublishAsync(eventbus.NewEvent("protocol.cj188.build", string(eventDataBytes)))
+	eventbus.PublishAsync(eventbus.NewEvent("protocol.dlt645-2007.build", string(eventDataBytes)))
 
-	c.JSON(http.StatusOK, dto.FrameResponse{
+	c.JSON(http.StatusOK, dto.Dlt645_2007Response{
 		Success:   true,
 		Message:   "构建成功",
 		HexData:   hexStr,
@@ -265,9 +193,9 @@ func BuildCj188(c *gin.Context) {
 	})
 }
 
-// SimulateCj188 模拟CJ188协议设备（从机）
-func SimulateCj188(c *gin.Context) {
-	var req dto.SimulateRequest
+// SimulateDlt645_2007 模拟DLT645-2007协议设备
+func SimulateDlt645_2007(c *gin.Context) {
+	var req dto.SimulateDlt645_2007Request
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -277,9 +205,17 @@ func SimulateCj188(c *gin.Context) {
 	}
 
 	// 设置默认值
-	if len(req.FlowData) == 0 {
-		// 默认累积流量：BCD码 [0x00, 0x02, 0x00, 0x00] = 20000
-		req.FlowData = []byte{0x00, 0x02, 0x00, 0x00}
+	if req.MeterData == 0 {
+		req.MeterData = 12345.67 // 默认电能数据
+	}
+	if req.Ia == 0 {
+		req.Ia = 10.5 // 默认A相电流
+	}
+	if req.Ib == 0 {
+		req.Ib = 10.3 // 默认B相电流
+	}
+	if req.Ic == 0 {
+		req.Ic = 10.8 // 默认C相电流
 	}
 	if req.BaudRate <= 0 {
 		req.BaudRate = 2400
@@ -311,32 +247,25 @@ func SimulateCj188(c *gin.Context) {
 		return
 	}
 
-	// 注册CJ188协议处理器（如果尚未注册）
+	// 注册DLT645-2007协议处理器
 	manager := simu.GetDefaultManager()
-	_, err := manager.GetProtocolHandler("cj188")
+	_, err := manager.GetProtocolHandler("dlt645-2007")
 	if err != nil {
-		manager.RegisterProtocolHandler("cj188", simu.NewCJ188Handler())
-	}
-
-	// 转换FlowData为interface{}切片（用于JSON配置）
-	flowDataInterface := make([]interface{}, len(req.FlowData))
-	for i, b := range req.FlowData {
-		flowDataInterface[i] = b
+		manager.RegisterProtocolHandler("dlt645-2007", simu.NewDLT645_2007Handler())
 	}
 
 	// 创建设备配置
 	config := &simu.DeviceConfig{
-		ProtocolType: "cj188",
+		ProtocolType: "dlt645-2007",
 		Config: map[string]interface{}{
-			"meterType": req.MeterType,
-			"addr":      req.Addr,
-			"flowData":  flowDataInterface,
-			"status":    req.Status,
+			"addr":       req.Addr,
+			"meterData":  req.MeterData,
+			"ia":         req.Ia,
+			"ib":         req.Ib,
+			"ic":         req.Ic,
+			"relayStatus": true, // 默认继电器合闸
 		},
 	}
-
-	// 初始化设备状态（根据初始配置设置状态）
-	// 注意：这里只是设置初始状态，实际状态会在设备运行过程中动态更新
 
 	// 生成设备ID
 	deviceID := fmt.Sprintf("%s_%s_%d", req.ConnType, req.Addr, time.Now().Unix())
@@ -375,27 +304,14 @@ func SimulateCj188(c *gin.Context) {
 			statusUpdater.StartStatusUpdate(3 * time.Second)
 		}
 
-		// 初始化设备状态（根据初始配置）
-		// CJ188协议：根据status字节解析初始状态
+		// 初始化设备状态
 		state := baseDevice.GetState()
 		if state != nil {
-			// 解析状态字节，设置初始状态
-			statusByte := byte(req.Status)
-			// D0-D1: 阀门状态
-			state.Set("valveStatus", int(statusByte&0x03))
-			// D2: 电池状态
-			state.Set("batteryStatus", (statusByte&0x04) != 0)
-			// D6: IT05状态
-			state.Set("it05Status", (statusByte&0x40) != 0)
-			// D6-D7: 报警器状态
-			state.Set("alarmStatus", int((statusByte>>6)&0x03))
-			// 累积流量（从flowData BCD码转换）
-			if len(req.FlowData) == 4 {
-				flowBytes := make([]byte, 4)
-				copy(flowBytes, req.FlowData)
-				flowValue := utils.HexTool.BCDToUint32(flowBytes)
-				state.Set("flowData", flowValue)
-			}
+			state.Set("meterData", req.MeterData)
+			state.Set("ia", req.Ia)
+			state.Set("ib", req.Ib)
+			state.Set("ic", req.Ic)
+			state.Set("relayStatus", true)
 		}
 	}
 
@@ -425,8 +341,8 @@ func SimulateCj188(c *gin.Context) {
 	})
 }
 
-// StopSimulateCj188 停止模拟设备
-func StopSimulateCj188(c *gin.Context) {
+// StopSimulateDlt645_2007 停止模拟设备
+func StopSimulateDlt645_2007(c *gin.Context) {
 	deviceID := c.Param("taskId")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -478,8 +394,8 @@ func StopSimulateCj188(c *gin.Context) {
 	})
 }
 
-// DeviceEventsSSE 设备事件SSE流
-func DeviceEventsSSE(c *gin.Context) {
+// DeviceEventsDlt645SSE 设备事件SSE流
+func DeviceEventsDlt645SSE(c *gin.Context) {
 	deviceID := c.Query("deviceId")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -510,13 +426,11 @@ func DeviceEventsSSE(c *gin.Context) {
 
 	// 订阅设备事件
 	unsubscribe := eventbus.Subscribe(fmt.Sprintf("device.%s.*", deviceID), func(ctx context.Context, event eventbus.Event) error {
-		// 将事件数据转换为JSON
 		eventData, err := json.Marshal(event.Data())
 		if err != nil {
 			return err
 		}
 
-		// 发送SSE事件
 		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event.Topic(), string(eventData))
 		flusher.Flush()
 		return nil
@@ -527,12 +441,12 @@ func DeviceEventsSSE(c *gin.Context) {
 	fmt.Fprintf(c.Writer, "event: connected\ndata: {\"message\":\"已连接到设备事件流\"}\n\n")
 	flusher.Flush()
 
-	// 保持连接，直到客户端断开
+	// 保持连接
 	<-ctx.Done()
 }
 
-// GetDeviceStatus 获取设备状态
-func GetDeviceStatus(c *gin.Context) {
+// GetDeviceStatusDLT645 获取设备状态
+func GetDeviceStatusDLT645(c *gin.Context) {
 	deviceID := c.Param("taskId")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -571,34 +485,8 @@ func GetDeviceStatus(c *gin.Context) {
 	})
 }
 
-// GetAllDevices 获取所有设备列表
-func GetAllDevices(c *gin.Context) {
-	manager := simu.GetDefaultManager()
-	devices := manager.ListDevices()
-
-	deviceList := make([]map[string]interface{}, 0)
-	for id, device := range devices {
-		state := device.GetState()
-		stats := device.GetStatistics()
-
-		deviceList = append(deviceList, map[string]interface{}{
-			"deviceId":   id,
-			"protocol":   device.GetConfig().ProtocolType,
-			"isRunning":  device.IsRunning(),
-			"state":      state.GetAll(),
-			"statistics": stats.GetSnapshot(),
-		})
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"devices": deviceList,
-		"count":   len(deviceList),
-	})
-}
-
-// GetDeviceStatistics 获取设备统计信息
-func GetDeviceStatistics(c *gin.Context) {
+// GetDeviceStatisticsDLT645 获取设备统计信息
+func GetDeviceStatisticsDLT645(c *gin.Context) {
 	deviceID := c.Param("taskId")
 	if deviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -626,8 +514,8 @@ func GetDeviceStatistics(c *gin.Context) {
 	})
 }
 
-// hexStringToBytes 将十六进制字符串转换为字节数组
-func hexStringToBytes(hexStr string) ([]byte, error) {
+// hexStringToBytes645 将十六进制字符串转换为字节数组
+func hexStringToBytes645(hexStr string) ([]byte, error) {
 	hexStr = strings.ReplaceAll(strings.ToUpper(hexStr), " ", "")
 	if len(hexStr)%2 != 0 {
 		return nil, fmt.Errorf("十六进制字符串长度必须是偶数")

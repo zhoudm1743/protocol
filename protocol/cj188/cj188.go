@@ -15,26 +15,114 @@ import (
 	"time"
 )
 
-var (
-	TYPE_WATER       = 0x10
-	TYPE_GAS         = 0x30
-	TYPE_ELECTRICITY = 0x40
+// 表计类型常量
+const (
+	TYPE_WATER       = 0x10 // 水表
+	TYPE_HEAT        = 0x20 // 热量表
+	TYPE_GAS         = 0x30 // 燃气表
+	TYPE_ELECTRICITY = 0x40 // 电表
 )
 
-type Cj188Frame struct {
-	Prefix   byte   // 1byte
-	Type     byte   // 1byte
-	Addr     string // 7byte
-	Control  byte   // 1byte
-	Len      int    // 1byte 数据域长度
-	DataID   []byte // 2byte 数据域标识 901F/1F90
-	Serial   byte   // 1byte 序号
-	Checksum byte   // 1byte 校验和
+// 数据标识常量
+const (
+	DATA_ID_FLOW_CURRENT   = 0x901F // 当前累积流量
+	DATA_ID_FLOW_DAILY     = 0x903F // 当日累积流量
+	DATA_ID_FLOW_MONTHLY   = 0x905F // 当月累积流量
+	DATA_ID_FLOW_INSTANT   = 0x901E // 瞬时流量
+	DATA_ID_TEMP_INLET     = 0x9025 // 进水温度
+	DATA_ID_TEMP_OUTLET    = 0x9026 // 出水温度
+	DATA_ID_HEAT_CURRENT   = 0x9041 // 当前累积热量
+	DATA_ID_POWER_INSTANT  = 0x903B // 瞬时功率
+	DATA_ID_WORK_TIME      = 0x90C1 // 工作时间
+)
 
-	Data      []byte    // 数据域
-	Unit      byte      // 1byte 单位
-	Status    byte      // 1byte 状态
-	Timestamp time.Time // 时间戳
+// 广播地址
+const BROADCAST_ADDR = "AAAAAAAAAAAAAA"
+
+type Cj188Frame struct {
+	Prefix      byte      // 1byte 帧起始符
+	Type        byte      // 1byte 表计类型
+	Addr        string    // 7byte 设备地址
+	Control     byte      // 1byte 控制码
+	Len         int       // 1byte 数据域长度
+	DataID      []byte    // 2byte 数据标识
+	Serial      byte      // 1byte 序列号
+	Checksum    byte      // 1byte 校验和
+	Data        []byte    // 数据域
+	Unit        byte      // 1byte 单位
+	Status      byte      // 1byte 状态
+	Timestamp   time.Time // 时间戳
+	IsBroadcast bool      // 是否为广播帧
+}
+
+// GetTypeName 获取表计类型名称
+func (f *Cj188Frame) GetTypeName() string {
+	switch f.Type {
+	case TYPE_WATER:
+		return "水表"
+	case TYPE_HEAT:
+		return "热量表"
+	case TYPE_GAS:
+		return "燃气表"
+	case TYPE_ELECTRICITY:
+		return "电表"
+	default:
+		return fmt.Sprintf("未知(%02X)", f.Type)
+	}
+}
+
+// GetControlName 获取控制码名称
+func (f *Cj188Frame) GetControlName() string {
+	switch f.Control {
+	case CTRL_READ:
+		return "读数据"
+	case CTRL_REPLY:
+		return "应答"
+	case CTRL_CLOSE_VALVE:
+		return "关阀"
+	case CTRL_OPEN_VALVE:
+		return "开阀"
+	case CTRL_SET_PARAM:
+		return "设置参数"
+	case CTRL_REPLY_CLOSE:
+		return "关阀应答"
+	case CTRL_REPLY_OPEN:
+		return "开阀应答"
+	case CTRL_REPLY_SET_PARAM:
+		return "设置参数应答"
+	default:
+		return fmt.Sprintf("未知(%02X)", f.Control)
+	}
+}
+
+// GetDataIDName 获取数据标识名称
+func (f *Cj188Frame) GetDataIDName() string {
+	if len(f.DataID) != 2 {
+		return "未知"
+	}
+	dataID := uint16(f.DataID[0])<<8 | uint16(f.DataID[1])
+	switch dataID {
+	case DATA_ID_FLOW_CURRENT:
+		return "当前累积流量"
+	case DATA_ID_FLOW_DAILY:
+		return "当日累积流量"
+	case DATA_ID_FLOW_MONTHLY:
+		return "当月累积流量"
+	case DATA_ID_FLOW_INSTANT:
+		return "瞬时流量"
+	case DATA_ID_TEMP_INLET:
+		return "进水温度"
+	case DATA_ID_TEMP_OUTLET:
+		return "出水温度"
+	case DATA_ID_HEAT_CURRENT:
+		return "当前累积热量"
+	case DATA_ID_POWER_INSTANT:
+		return "瞬时功率"
+	case DATA_ID_WORK_TIME:
+		return "工作时间"
+	default:
+		return fmt.Sprintf("未知(%04X)", dataID)
+	}
 }
 
 // GetFlowData 获取累积流量值（4字节，BCD码，小端序）
@@ -103,6 +191,12 @@ const (
 	CTRL_REPLY_CLOSE     = 0xA5 // 关阀应答控制码
 	CTRL_REPLY_OPEN      = 0xA6 // 开阀应答控制码
 	CTRL_REPLY_SET_PARAM = 0xA7 // 设置参数应答控制码
+	CTRL_CMD_CLOSE       = 0x1A // 关阀指令
+	CTRL_CMD_OPEN        = 0x1B // 开阀指令
+	CTRL_CMD_SET_PARAM   = 0x1C // 设置参数指令
+	CTRL_REPLY_CMD_CLOSE = 0x9A // 关阀应答
+	CTRL_REPLY_CMD_OPEN  = 0x9B // 开阀应答
+	CTRL_REPLY_CMD_SET_PARAM = 0x9C // 设置参数应答
 )
 
 // Parser188 解析CJ188协议帧
@@ -125,9 +219,12 @@ func Parser188(data []byte) (*Cj188Frame, error) {
 	// 3. 解析表计类型
 	ret.Type = data[1]
 
-	// 4. 解析地址（7字节，地址是BCD码，需要反向读取并转换为十进制字符串）
+	// 4. 解析地址（7字节，BCD码）
 	addrBytes := data[2:9]
 	ret.Addr = utils.HexTool.BCDToDecimal(addrBytes)
+	
+	// 5. 检查是否为广播地址
+	ret.IsBroadcast = (ret.Addr == BROADCAST_ADDR)
 
 	// 5. 解析控制码
 	ret.Control = data[9]
@@ -357,6 +454,94 @@ func Build188Reply(meterType byte, addr string, dataID []byte, serial byte, flow
 	frame = append(frame, dataField...) // 数据域
 
 	// 6. 计算校验和（从帧起始符到数据域结束）
+	checksum := utils.HexTool.CheckSum(frame)
+	frame = append(frame, checksum)  // 校验和
+	frame = append(frame, FRAME_END) // 帧结束符
+
+	return frame, nil
+}
+
+// Build188Control 构建CJ188协议控制指令帧（关阀/开阀）
+func Build188Control(meterType byte, addr string, dataID []byte, serial byte, operCode byte) ([]byte, error) {
+	// 1. 将十进制地址字符串转换为7字节BCD码
+	addrBytes, err := utils.HexTool.DecimalToBCD(addr, 7)
+	if err != nil {
+		return nil, fmt.Errorf("地址转换失败: %v", err)
+	}
+
+	// 2. 验证数据标识长度
+	if len(dataID) != 2 {
+		return nil, fmt.Errorf("数据标识长度错误: 需要2字节，实际%d字节", len(dataID))
+	}
+
+	// 3. 确定控制码
+	var ctrlCode byte
+	switch operCode {
+	case 0x1A: // 关阀
+		ctrlCode = CTRL_CMD_CLOSE
+	case 0x1B: // 开阀
+		ctrlCode = CTRL_CMD_OPEN
+	default:
+		ctrlCode = CTRL_CMD_SET_PARAM
+	}
+
+	// 4. 构建数据域：操作码(1) + 序列号(1)
+	dataField := []byte{operCode, serial}
+
+	// 5. 构建帧
+	frame := make([]byte, 0, 16)
+	frame = append(frame, FRAME_START)  // 帧起始符
+	frame = append(frame, meterType)    // 表计类型
+	frame = append(frame, addrBytes...) // 地址（7字节）
+	frame = append(frame, ctrlCode)     // 控制码
+	frame = append(frame, byte(len(dataField))) // 数据域长度
+	frame = append(frame, dataField...) // 数据域
+
+	// 6. 计算校验和
+	checksum := utils.HexTool.CheckSum(frame)
+	frame = append(frame, checksum)  // 校验和
+	frame = append(frame, FRAME_END) // 帧结束符
+
+	return frame, nil
+}
+
+// Build188ControlReply 构建CJ188控制指令应答帧
+func Build188ControlReply(meterType byte, addr string, dataID []byte, serial byte, operCode byte, result byte) ([]byte, error) {
+	// 1. 将十进制地址字符串转换为7字节BCD码
+	addrBytes, err := utils.HexTool.DecimalToBCD(addr, 7)
+	if err != nil {
+		return nil, fmt.Errorf("地址转换失败: %v", err)
+	}
+
+	// 2. 验证数据标识长度
+	if len(dataID) != 2 {
+		return nil, fmt.Errorf("数据标识长度错误: 需要2字节，实际%d字节", len(dataID))
+	}
+
+	// 3. 确定应答控制码
+	var ctrlCode byte
+	switch operCode {
+	case 0x1A: // 关阀应答
+		ctrlCode = CTRL_REPLY_CLOSE
+	case 0x1B: // 开阀应答
+		ctrlCode = CTRL_REPLY_OPEN
+	default:
+		ctrlCode = CTRL_REPLY_SET_PARAM
+	}
+
+	// 4. 构建数据域：操作码(1) + 序列号(1) + 保留(2) + 执行结果(1) = 5字节
+	dataField := []byte{operCode, serial, 0x00, 0x00, result}
+
+	// 5. 构建帧
+	frame := make([]byte, 0, 20)
+	frame = append(frame, FRAME_START)  // 帧起始符
+	frame = append(frame, meterType)    // 表计类型
+	frame = append(frame, addrBytes...) // 地址（7字节）
+	frame = append(frame, ctrlCode)     // 控制码
+	frame = append(frame, byte(len(dataField))) // 数据域长度（5字节）
+	frame = append(frame, dataField...) // 数据域
+
+	// 6. 计算校验和
 	checksum := utils.HexTool.CheckSum(frame)
 	frame = append(frame, checksum)  // 校验和
 	frame = append(frame, FRAME_END) // 帧结束符

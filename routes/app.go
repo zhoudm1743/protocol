@@ -32,8 +32,23 @@ func InitRoutes(r *gin.Engine) {
 			cj188.POST("/parse", controller.ParseCj188)                        // 解析协议帧
 			cj188.POST("/build", controller.BuildCj188)                        // 构建协议帧
 			cj188.POST("/simulate", controller.SimulateCj188)                  // 模拟协议数据
-			cj188.POST("/simulate/:taskId/stop", controller.StopSimulateCj188) // 停止模拟任务
+			cj188.DELETE("/simulate/:taskId", controller.StopSimulateCj188)    // 停止模拟任务
 			cj188.GET("/events", controller.DeviceEventsSSE)                   // 设备事件SSE流
+			cj188.GET("/status/:taskId", controller.GetDeviceStatus)           // 设备状态查询
+			cj188.GET("/statistics/:taskId", controller.GetDeviceStatistics)   // 设备统计信息查询
+			cj188.GET("/devices", controller.GetAllDevices)                    // 所有设备查询
+		}
+
+		// DLT645-2007 协议路由
+		dlt645 := api.Group("/dlt645-2007")
+		{
+			dlt645.POST("/parse", controller.ParseDlt645_2007)                         // 解析协议帧
+			dlt645.POST("/build", controller.BuildDlt645_2007)                         // 构建协议帧
+			dlt645.POST("/simulate", controller.SimulateDlt645_2007)                   // 模拟协议数据
+			dlt645.POST("/simulate/:taskId/stop", controller.StopSimulateDlt645_2007)  // 停止模拟任务
+			dlt645.GET("/events", controller.DeviceEventsDlt645SSE)                    // 设备事件SSE流
+			dlt645.GET("/status/:taskId", controller.GetDeviceStatusDLT645)            // 设备状态查询
+			dlt645.GET("/statistics/:taskId", controller.GetDeviceStatisticsDLT645)    // 设备统计信息查询
 		}
 	}
 
@@ -65,7 +80,9 @@ func handleSSE(c *gin.Context) {
 
 	// 订阅协议事件
 	bus := eventbus.GetDefaultBus()
-	unsubscribe := bus.Subscribe("protocol.cj188.*", func(ctx context.Context, event eventbus.Event) error {
+	
+	// 订阅CJ188协议事件
+	unsubscribeCj188 := bus.Subscribe("protocol.cj188.*", func(ctx context.Context, event eventbus.Event) error {
 		// 解析事件数据（可能是JSON字符串）
 		var eventDataObj interface{}
 		if dataStr, ok := event.Data().(string); ok {
@@ -86,7 +103,31 @@ func handleSSE(c *gin.Context) {
 		})
 		return client.Send("protocol", string(eventData))
 	})
-	defer unsubscribe()
+	defer unsubscribeCj188()
+	
+	// 订阅DLT645-2007协议事件
+	unsubscribeDlt645 := bus.Subscribe("protocol.dlt645-2007.*", func(ctx context.Context, event eventbus.Event) error {
+		// 解析事件数据（可能是JSON字符串）
+		var eventDataObj interface{}
+		if dataStr, ok := event.Data().(string); ok {
+			// 如果是字符串，尝试解析为JSON
+			if err := json.Unmarshal([]byte(dataStr), &eventDataObj); err != nil {
+				// 解析失败，直接使用字符串
+				eventDataObj = dataStr
+			}
+		} else {
+			eventDataObj = event.Data()
+		}
+
+		// 将事件数据发送给客户端
+		eventData, _ := json.Marshal(map[string]interface{}{
+			"topic":     event.Topic(),
+			"data":      eventDataObj,
+			"timestamp": event.Timestamp().Format("2006-01-02 15:04:05"),
+		})
+		return client.Send("protocol", string(eventData))
+	})
+	defer unsubscribeDlt645()
 
 	// 发送初始连接消息
 	client.Send("connect", `{"message":"已连接"}`)

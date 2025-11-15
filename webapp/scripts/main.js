@@ -122,7 +122,8 @@ layui.use(["layer", "form", "element", "jquery", "laytpl",], function() {
     {
       title: "协议管理",
       children: [
-        { title: "CJ188协议", href: "./pages/protocol/cj188.html" }
+        { title: "CJ188协议", href: "./pages/protocol/cj188.html" },
+        { title: "DLT645-2007协议", href: "./pages/protocol/dlt645-2007.html" }
       ]
     }
   ];
